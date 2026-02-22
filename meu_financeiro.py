@@ -104,7 +104,13 @@ with tab_lanc:
                 data_base = st.date_input("Vencimento", datetime.now())
                 os_num = st.text_input("Nº OS")
                 cliente_sel = st.selectbox("Cliente", ["N/A"] + sorted(clientes_user["Nome"].tolist()))
-                cat_opcoes = sorted(["Carro Combustível", "Carro Multa", "Carro Pedágio", "Escola", "Farmácia", "Imposto", "Manutenção Preventiva", "Material", "Mercado", "Peças Elevador", "Outros"])
+                
+                # LISTA ATUALIZADA COM "PAGAMENTO"
+                cat_opcoes = sorted([
+                    "Carro Combustível", "Carro Multa", "Carro Pedágio", 
+                    "Escola", "Farmácia", "Imposto", "Manutenção Preventiva", 
+                    "Material", "Mercado", "Pagamento", "Peças Elevador", "Outros"
+                ])
                 categoria_sel = st.selectbox("Categoria", cat_opcoes)
                 categoria_final = st.text_input("Especifique") if categoria_sel == "Outros" else categoria_sel
             with c2:
@@ -198,8 +204,7 @@ with tab_cartoes:
 with tab_relat:
     c_e, c_p = st.columns(2)
     df_v = df_user[df_user['Status'] != "Recusado"]
-    # --- CORREÇÃO DAS CORES DOS RELATÓRIOS AQUI ---
-    paleta_cores = px.colors.qualitative.Pastel # Cores variadas e suaves
+    paleta_cores = px.colors.qualitative.Pastel
     with c_e:
         df_m = df_v[df_v['Ambiente'] == "Empresa"]
         if not df_m.empty: st.plotly_chart(px.pie(df_m, values='Valor', names='Categoria', hole=.4, title="Empresa", color_discrete_sequence=paleta_cores), use_container_width=True)
