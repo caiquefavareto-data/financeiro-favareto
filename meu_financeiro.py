@@ -130,7 +130,6 @@ with tab_lanc:
         if not df_user.empty:
             df_at = df_user[df_user['Status'] != "Recusado"]
             st.metric("Saldo Real", f"R$ {df_at[df_at['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_at[df_at['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum():,.2f}")
-            # CORES CORRIGIDAS AQUI
             fig = px.pie(df_user, values='Valor', names='Status', hole=.6, color='Status', color_discrete_map={'Concluído':'#00CC96', 'Pendente':'#FFA15A', 'Recusado':'#EF553B'})
             fig.update_layout(showlegend=False, height=140, margin=dict(t=0,b=0,l=0,r=0)); st.plotly_chart(fig, use_container_width=True)
 
@@ -157,19 +156,27 @@ with tab_lanc:
 
     with col_ed:
         st.subheader("📑 Edição")
-        os_sel = st.selectbox("Escolha a OS:", ["---"] + df_t["OS"].tolist())
+        os_sel = st.selectbox("Escolha a OS:", ["---"] + df_t["OS"].tolist(), key="sb_os_edicao")
         if os_sel != "---":
             inf = df_user[df_user["OS"] == os_sel].iloc[0]
             with st.container(border=True):
-                nv_venc = st.date_input("Vencimento", inf['Data_Vencimento'])
-                nv_val = st.number_input("Valor", value=float(inf['Valor']))
-                nv_st = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"], index=["Pendente", "Concluído", "Recusado"].index(inf['Status']))
-                if st.button("Confirmar"):
+                # --- CORREÇÃO DO ERRO AQUI (Adicionadas Keys Únicas) ---
+                nv_venc = st.date_input("Vencimento", inf['Data_Vencimento'], key=f"date_{os_sel}")
+                nv_val = st.number_input("Valor", value=float(inf['Valor']), key=f"val_{os_sel}")
+                nv_st = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"], 
+                                     index=["Pendente", "Concluído", "Recusado"].index(inf['Status']), 
+                                     key=f"status_{os_sel}")
+                
+                if st.button("Confirmar", use_container_width=True, key=f"btn_{os_sel}"):
                     idx = st.session_state.df[st.session_state.df["OS"] == os_sel].index
-                    st.session_state.df.at[idx[0], "Data_Vencimento"], st.session_state.df.at[idx[0], "Valor"], st.session_state.df.at[idx[0], "Status"] = nv_venc, nv_val, nv_st
-                    salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+                    st.session_state.df.at[idx[0], "Data_Vencimento"] = nv_venc
+                    st.session_state.df.at[idx[0], "Valor"] = nv_val
+                    st.session_state.df.at[idx[0], "Status"] = nv_st
+                    salvar_dados(st.session_state.df, ARQUIVO_DADOS)
+                    st.rerun()
                 st.info(inf['Detalhes'])
 
+# --- REPETIR ABAS RESTANTES ---
 with tab_clientes:
     c1, c2 = st.columns([1, 2])
     with c1:
