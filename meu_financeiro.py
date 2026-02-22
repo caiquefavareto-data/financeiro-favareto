@@ -13,7 +13,7 @@ ARQUIVO_CARTOES = "meus_cartoes.csv"
 ARQUIVO_CLIENTES = "meus_clientes.csv"
 ARQUIVO_ACESSOS = "meus_acessos.csv"
 
-# --- 2. FUNÇÕES DE DADOS E SEGURANÇA ---
+# --- 2. FUNÇÕES DE DADOS ---
 def carregar_dados(arquivo, colunas):
     if os.path.exists(arquivo):
         df = pd.read_csv(arquivo)
@@ -75,7 +75,7 @@ def tela_acesso():
 
 if not tela_acesso(): st.stop()
 
-# --- 4. INICIALIZAÇÃO PÓS-LOGIN ---
+# --- 4. INICIALIZAÇÃO ---
 user = st.session_state.usuario
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(ARQUIVO_DADOS, ["OS", "NF", "Data_Vencimento", "Ambiente", "Tipo_Fluxo", "Descricao", "Categoria", "Valor", "Status", "Cliente", "Usuario", "Cartao", "Detalhes"])
@@ -127,21 +127,15 @@ with tab_lanc:
 
     with col_g:
         if not df_user.empty:
-            # --- CORREÇÃO DO SALDO DUPLO ---
             df_at = df_user[df_user['Status'] != "Recusado"]
-            
-            # Cálculo Empresa
             df_emp = df_at[df_at['Ambiente'] == "Empresa"]
             saldo_emp = df_emp[df_emp['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_emp[df_emp['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
-            
-            # Cálculo Pessoal
             df_pes = df_at[df_at['Ambiente'] == "Pessoal"]
             saldo_pes = df_pes[df_pes['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_pes[df_pes['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
             
             st.metric("Saldo Empresa (PJ)", f"R$ {saldo_emp:,.2f}")
             st.metric("Saldo Pessoal (PF)", f"R$ {saldo_pes:,.2f}")
             
-            st.divider()
             fig = px.pie(df_user, values='Valor', names='Status', hole=.6, color='Status', color_discrete_map={'Concluído':'#00CC96', 'Pendente':'#FFA15A', 'Recusado':'#EF553B'})
             fig.update_layout(showlegend=False, height=140, margin=dict(t=0,b=0,l=0,r=0)); st.plotly_chart(fig, use_container_width=True)
 
@@ -181,7 +175,6 @@ with tab_lanc:
                     salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
                 st.info(inf['Detalhes'])
 
-# --- REPETIR ABAS ---
 with tab_clientes:
     c1, c2 = st.columns([1, 2])
     with c1:
@@ -198,15 +191,25 @@ with tab_cartoes:
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.form("add_card"):
-            n, l = st.text_input("Cartão"), st.number_input("Limite")
+            n = st.text_input("Nome do Cartão")
+            l = st.number_input("Limite Total", min_value=1.0, value=1000.0) # Evita limite zero
             if st.form_submit_button("✅ Adicionar"):
                 new = pd.DataFrame([{"Nome": n, "Limite_Total": l, "Usuario": user}])
                 st.session_state.cartoes = pd.concat([st.session_state.cartoes, new], ignore_index=True)
                 salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
     with c2:
         for _, r in cartoes_user.iterrows():
-            u = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Status'] != 'Recusado')]['Valor'].sum()
-            st.write(f"**{r['Nome']}**"); st.progress(min(u/r['Limite_Total'], 1.0)); st.caption(f"Livre: R$ {r['Limite_Total']-u:,.2f}")
+            # Filtra apenas saídas deste cartão específico
+            u = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Status'] != 'Recusado') & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)')]['Valor'].sum()
+            
+            # --- CORREÇÃO DO ERRO AQUI ---
+            # Garantir que o valor de progresso esteja entre 0.0 e 1.0
+            limite = r['Limite_Total'] if r['Limite_Total'] > 0 else 1.0
+            progresso = max(0.0, min(u / limite, 1.0))
+            
+            st.write(f"**{r['Nome']}**")
+            st.progress(progresso)
+            st.caption(f"Livre: R$ {max(0.0, r['Limite_Total']-u):,.2f}")
 
 with tab_relat:
     c_e, c_p = st.columns(2)
