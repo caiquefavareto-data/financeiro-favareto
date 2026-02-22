@@ -160,23 +160,15 @@ with tab_lanc:
         if os_sel != "---":
             inf = df_user[df_user["OS"] == os_sel].iloc[0]
             with st.container(border=True):
-                # --- CORREÇÃO DO ERRO AQUI (Adicionadas Keys Únicas) ---
                 nv_venc = st.date_input("Vencimento", inf['Data_Vencimento'], key=f"date_{os_sel}")
                 nv_val = st.number_input("Valor", value=float(inf['Valor']), key=f"val_{os_sel}")
-                nv_st = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"], 
-                                     index=["Pendente", "Concluído", "Recusado"].index(inf['Status']), 
-                                     key=f"status_{os_sel}")
-                
+                nv_st = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"], index=["Pendente", "Concluído", "Recusado"].index(inf['Status']), key=f"status_{os_sel}")
                 if st.button("Confirmar", use_container_width=True, key=f"btn_{os_sel}"):
                     idx = st.session_state.df[st.session_state.df["OS"] == os_sel].index
-                    st.session_state.df.at[idx[0], "Data_Vencimento"] = nv_venc
-                    st.session_state.df.at[idx[0], "Valor"] = nv_val
-                    st.session_state.df.at[idx[0], "Status"] = nv_st
-                    salvar_dados(st.session_state.df, ARQUIVO_DADOS)
-                    st.rerun()
+                    st.session_state.df.at[idx[0], "Data_Vencimento"], st.session_state.df.at[idx[0], "Valor"], st.session_state.df.at[idx[0], "Status"] = nv_venc, nv_val, nv_st
+                    salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
                 st.info(inf['Detalhes'])
 
-# --- REPETIR ABAS RESTANTES ---
 with tab_clientes:
     c1, c2 = st.columns([1, 2])
     with c1:
@@ -206,12 +198,14 @@ with tab_cartoes:
 with tab_relat:
     c_e, c_p = st.columns(2)
     df_v = df_user[df_user['Status'] != "Recusado"]
+    # --- CORREÇÃO DAS CORES DOS RELATÓRIOS AQUI ---
+    paleta_cores = px.colors.qualitative.Pastel # Cores variadas e suaves
     with c_e:
         df_m = df_v[df_v['Ambiente'] == "Empresa"]
-        if not df_m.empty: st.plotly_chart(px.pie(df_m, values='Valor', names='Categoria', hole=.4, title="Empresa"), use_container_width=True)
+        if not df_m.empty: st.plotly_chart(px.pie(df_m, values='Valor', names='Categoria', hole=.4, title="Empresa", color_discrete_sequence=paleta_cores), use_container_width=True)
     with c_p:
         df_h = df_v[df_v['Ambiente'] == "Pessoal"]
-        if not df_h.empty: st.plotly_chart(px.pie(df_h, values='Valor', names='Categoria', hole=.4, title="Pessoal"), use_container_width=True)
+        if not df_h.empty: st.plotly_chart(px.pie(df_h, values='Valor', names='Categoria', hole=.4, title="Pessoal", color_discrete_sequence=paleta_cores), use_container_width=True)
 
 with tab_conf:
     if st.button("🚪 Sair"):
