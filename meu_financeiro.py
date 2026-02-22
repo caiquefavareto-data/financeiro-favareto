@@ -56,7 +56,6 @@ def tela_acesso():
                         st.session_state.usuario = u_login
                         st.rerun()
                     else: st.error("Usuário ou senha incorretos.")
-
             else:
                 st.subheader("Cadastrar Novo Usuário")
                 u_novo = st.text_input("Escolha seu Nome").strip()
@@ -104,13 +103,7 @@ with tab_lanc:
                 data_base = st.date_input("Vencimento", datetime.now())
                 os_num = st.text_input("Nº OS")
                 cliente_sel = st.selectbox("Cliente", ["N/A"] + sorted(clientes_user["Nome"].tolist()))
-                
-                # LISTA ATUALIZADA COM "PAGAMENTO"
-                cat_opcoes = sorted([
-                    "Carro Combustível", "Carro Multa", "Carro Pedágio", 
-                    "Escola", "Farmácia", "Imposto", "Manutenção Preventiva", 
-                    "Material", "Mercado", "Pagamento", "Peças Elevador", "Outros"
-                ])
+                cat_opcoes = sorted(["Carro Combustível", "Carro Multa", "Carro Pedágio", "Escola", "Farmácia", "Imposto", "Manutenção Preventiva", "Material", "Mercado", "Pagamento", "Peças Elevador", "Outros"])
                 categoria_sel = st.selectbox("Categoria", cat_opcoes)
                 categoria_final = st.text_input("Especifique") if categoria_sel == "Outros" else categoria_sel
             with c2:
@@ -134,8 +127,21 @@ with tab_lanc:
 
     with col_g:
         if not df_user.empty:
+            # --- CORREÇÃO DO SALDO DUPLO ---
             df_at = df_user[df_user['Status'] != "Recusado"]
-            st.metric("Saldo Real", f"R$ {df_at[df_at['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_at[df_at['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum():,.2f}")
+            
+            # Cálculo Empresa
+            df_emp = df_at[df_at['Ambiente'] == "Empresa"]
+            saldo_emp = df_emp[df_emp['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_emp[df_emp['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
+            
+            # Cálculo Pessoal
+            df_pes = df_at[df_at['Ambiente'] == "Pessoal"]
+            saldo_pes = df_pes[df_pes['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_pes[df_pes['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
+            
+            st.metric("Saldo Empresa (PJ)", f"R$ {saldo_emp:,.2f}")
+            st.metric("Saldo Pessoal (PF)", f"R$ {saldo_pes:,.2f}")
+            
+            st.divider()
             fig = px.pie(df_user, values='Valor', names='Status', hole=.6, color='Status', color_discrete_map={'Concluído':'#00CC96', 'Pendente':'#FFA15A', 'Recusado':'#EF553B'})
             fig.update_layout(showlegend=False, height=140, margin=dict(t=0,b=0,l=0,r=0)); st.plotly_chart(fig, use_container_width=True)
 
@@ -175,6 +181,7 @@ with tab_lanc:
                     salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
                 st.info(inf['Detalhes'])
 
+# --- REPETIR ABAS ---
 with tab_clientes:
     c1, c2 = st.columns([1, 2])
     with c1:
