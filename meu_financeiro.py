@@ -175,52 +175,83 @@ with tab_lanc:
                     salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
                 st.info(inf['Detalhes'])
 
+# --- 👥 ABA CLIENTES ATUALIZADA (COM EXCLUSÃO) ---
 with tab_clientes:
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.form("add_cli"):
-            n_c = st.text_input("Novo Cliente")
+            n_c = st.text_input("Novo Condomínio/Cliente")
             if st.form_submit_button("✅ Cadastrar"):
                 if n_c:
                     new = pd.DataFrame([{"Nome": n_c, "Usuario": user}])
                     st.session_state.clientes = pd.concat([st.session_state.clientes, new], ignore_index=True)
                     salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
-    with c2: st.dataframe(clientes_user[["Nome"]], use_container_width=True, hide_index=True)
+    with c2:
+        st.subheader("Gerenciar Clientes")
+        if not clientes_user.empty:
+            df_cli_ed = clientes_user.copy()
+            df_cli_ed.insert(0, "Apagar", False)
+            edit_cli = st.data_editor(df_cli_ed[["Apagar", "Nome"]], hide_index=True, use_container_width=True)
+            if st.button("🗑️ Remover Clientes Selecionados"):
+                clis_para_remover = edit_cli[edit_cli["Apagar"] == True]["Nome"].tolist()
+                st.session_state.clientes = st.session_state.clientes[~(st.session_state.clientes["Nome"].isin(clis_para_remover) & (st.session_state.clientes["Usuario"] == user))]
+                salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
+        else: st.info("Nenhum cliente cadastrado.")
 
+# --- 💳 ABA CARTÕES ATUALIZADA (COM EXCLUSÃO) ---
 with tab_cartoes:
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.form("add_card"):
             n = st.text_input("Nome do Cartão")
-            l = st.number_input("Limite Total", min_value=1.0, value=1000.0) # Evita limite zero
+            l = st.number_input("Limite Total", min_value=1.0, value=1000.0)
             if st.form_submit_button("✅ Adicionar"):
                 new = pd.DataFrame([{"Nome": n, "Limite_Total": l, "Usuario": user}])
                 st.session_state.cartoes = pd.concat([st.session_state.cartoes, new], ignore_index=True)
                 salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
     with c2:
-        for _, r in cartoes_user.iterrows():
-            # Filtra apenas saídas deste cartão específico
-            u = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Status'] != 'Recusado') & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)')]['Valor'].sum()
+        st.subheader("Meus Cartões")
+        if not cartoes_user.empty:
+            # Layout para exclusão de cartões
+            df_car_ed = cartoes_user.copy()
+            df_car_ed.insert(0, "Apagar", False)
+            edit_car = st.data_editor(df_car_ed[["Apagar", "Nome", "Limite_Total"]], hide_index=True, use_container_width=True)
             
-            # --- CORREÇÃO DO ERRO AQUI ---
-            # Garantir que o valor de progresso esteja entre 0.0 e 1.0
-            limite = r['Limite_Total'] if r['Limite_Total'] > 0 else 1.0
-            progresso = max(0.0, min(u / limite, 1.0))
+            if st.button("🗑️ Remover Cartões Selecionados"):
+                cars_para_remover = edit_car[edit_car["Apagar"] == True]["Nome"].tolist()
+                st.session_state.cartoes = st.session_state.cartoes[~(st.session_state.cartoes["Nome"].isin(cars_para_remover) & (st.session_state.cartoes["Usuario"] == user))]
+                salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
             
-            st.write(f"**{r['Nome']}**")
-            st.progress(progresso)
-            st.caption(f"Livre: R$ {max(0.0, r['Limite_Total']-u):,.2f}")
+            st.divider()
+            # Visualização das barras de limite
+            for _, r in cartoes_user.iterrows():
+                u = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Status'] != 'Recusado') & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)')]['Valor'].sum()
+                limite = r['Limite_Total'] if r['Limite_Total'] > 0 else 1.0
+                progresso = max(0.0, min(u / limite, 1.0))
+                st.write(f"**{r['Nome']}**")
+                st.progress(progresso)
+                st.caption(f"Livre: R$ {max(0.0, r['Limite_Total']-u):,.2f}")
+        else: st.info("Nenhum cartão cadastrado.")
 
+# --- 📈 ABA RELATÓRIOS ---
 with tab_relat:
-    c_e, c_p = st.columns(2)
+    st.subheader("📊 Resumo de Entradas vs Saídas")
     df_v = df_user[df_user['Status'] != "Recusado"]
-    paleta_cores = px.colors.qualitative.Pastel
-    with c_e:
-        df_m = df_v[df_v['Ambiente'] == "Empresa"]
-        if not df_m.empty: st.plotly_chart(px.pie(df_m, values='Valor', names='Categoria', hole=.4, title="Empresa", color_discrete_sequence=paleta_cores), use_container_width=True)
-    with c_p:
-        df_h = df_v[df_v['Ambiente'] == "Pessoal"]
-        if not df_h.empty: st.plotly_chart(px.pie(df_h, values='Valor', names='Categoria', hole=.4, title="Pessoal", color_discrete_sequence=paleta_cores), use_container_width=True)
+    if not df_v.empty:
+        fig_balanco = px.pie(df_v, values='Valor', names='Tipo_Fluxo', hole=.5, color='Tipo_Fluxo', color_discrete_map={'Entrada (Recebimento)': '#2ECC71', 'Saída (Pagamento)': '#E74C3C'}, title="Balanço Geral: Recebido vs Gasto")
+        st.plotly_chart(fig_balanco, use_container_width=True)
+        st.divider()
+        st.subheader("💸 Gastos por Categoria (Saídas)")
+        c_e, c_p = st.columns(2)
+        df_saidas = df_v[df_v['Tipo_Fluxo'] == 'Saída (Pagamento)']
+        cores_vibrantes = px.colors.qualitative.Bold
+        with c_e:
+            df_m = df_saidas[df_saidas['Ambiente'] == "Empresa"]
+            if not df_m.empty: st.plotly_chart(px.pie(df_m, values='Valor', names='Categoria', hole=.4, title="Empresa (Gastos)", color_discrete_sequence=cores_vibrantes), use_container_width=True)
+        with c_p:
+            df_h = df_saidas[df_saidas['Ambiente'] == "Pessoal"]
+            if not df_h.empty: st.plotly_chart(px.pie(df_h, values='Valor', names='Categoria', hole=.4, title="Pessoal (Gastos)", color_discrete_sequence=cores_vibrantes), use_container_width=True)
+    else: st.warning("Nenhum dado encontrado.")
 
 with tab_conf:
     if st.button("🚪 Sair"):
