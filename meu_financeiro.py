@@ -1,34 +1,65 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime, timedelta
 import plotly.express as px
 import hashlib
+import gspread
+from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Gestor Pro - Elevadores", layout="wide")
-
-ARQUIVO_DADOS = "dados_financeiros.csv"
-ARQUIVO_CARTOES = "meus_cartoes.csv"
-ARQUIVO_CLIENTES = "meus_clientes.csv"
-ARQUIVO_ACESSOS = "meus_acessos.csv"
+# --- 1. CONEXÃO COM GOOGLE SHEETS ---
+def conectar_google_sheets():
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # Puxa das Secrets que você configurou no painel do Streamlit
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client = gspread.authorize(creds)
+    # Abre a planilha pelo nome
+    return client.open("Banco_Dados_Gestor_Pro")
 
 # --- 2. FUNÇÕES DE DADOS ---
-def carregar_dados(arquivo, colunas):
-    if os.path.exists(arquivo):
-        df = pd.read_csv(arquivo)
-        for col in colunas:
-            if col not in df.columns: df[col] = ""
-        if not df.empty and 'Data_Vencimento' in df.columns:
-            df['Data_Vencimento'] = pd.to_datetime(df['Data_Vencimento']).dt.date
+def carregar_aba(aba_nome, colunas):
+    try:
+        sh = conectar_google_sheets()
+        worksheet = sh.worksheet(aba_nome)
+        data = worksheet.get_all_records()
+        df = pd.DataFrame(data)
+        if df.empty:
+            return pd.DataFrame(columns=colunas)
+        if 'Data_Vencimento' in df.columns:
+            # Garante que as datas voltem a ser objetos de data
+            df['Data_Vencimento'] = pd.to_datetime(df['Data_Vencimento'], errors='coerce').dt.date
         return df
-    return pd.DataFrame(columns=colunas)
+    except Exception as e:
+        # Se a aba não existir, retorna vazio
+        return pd.DataFrame(columns=colunas)
 
-def salvar_dados(df, arquivo):
-    df.to_csv(arquivo, index=False)
+def salvar_aba(df, aba_nome):
+    try:
+        sh = conectar_google_sheets()
+        worksheet = sh.worksheet(aba_nome)
+        worksheet.clear()
+        df_save = df.copy()
+        # Converte datas para string para o Google Sheets aceitar
+        for col in df_save.columns:
+            if 'date' in col.lower() or df_save[col].dtype == 'object':
+                df_save[col] = df_save[col].astype(str)
+        # Atualiza a planilha (cabeçalho + dados)
+        worksheet.update([df_save.columns.values.tolist()] + df_save.values.tolist())
+    except Exception as e:
+        st.error(f"Erro ao salvar no Google: {e}")
 
 def hash_senha(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
+
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Gestor Pro - Elevadores", layout="wide")
+
+# Inicialização de dados vindos do Google
+if 'df' not in st.session_state:
+    st.session_state.df = carregar_aba("lancamentos", ["OS", "NF", "Data_Vencimento", "Ambiente", "Tipo_Fluxo", "Descricao", "Categoria", "Valor", "Status", "Cliente", "Usuario", "Cartao", "Detalhes"])
+if 'cartoes' not in st.session_state:
+    st.session_state.cartoes = carregar_aba("cartoes", ["Nome", "Limite_Total", "Usuario"])
+if 'clientes' not in st.session_state:
+    st.session_state.clientes = carregar_aba("clientes", ["Nome", "Usuario"])
 
 # --- 3. ACESSO ---
 if "autenticado" not in st.session_state:
@@ -36,24 +67,24 @@ if "autenticado" not in st.session_state:
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         opcao = st.radio("Escolha:", ["Login", "Cadastro"], horizontal=True)
-        df_acessos = carregar_dados(ARQUIVO_ACESSOS, ["Usuario", "Senha"])
+        df_acessos = carregar_aba("acessos", ["Usuario", "Senha"])
         u = st.text_input("Usuário").strip()
         p = st.text_input("Senha", type="password")
         if st.button("Acessar" if opcao == "Login" else "Cadastrar", use_container_width=True):
-            if (u == "Caique" and p == "11") or not df_acessos[(df_acessos["Usuario"] == u) & (df_acessos["Senha"] == hash_senha(p))].empty:
-                st.session_state.autenticado, st.session_state.usuario = True, u
-                st.rerun()
-            else: st.error("Erro no login.")
+            if opcao == "Login":
+                if (u == "Caique" and p == "11") or not df_acessos[(df_acessos["Usuario"] == u) & (df_acessos["Senha"] == hash_senha(p))].empty:
+                    st.session_state.autenticado, st.session_state.usuario = True, u
+                    st.rerun()
+                else: st.error("Erro no login.")
+            else:
+                if u and p:
+                    nova = pd.DataFrame([{"Usuario": u, "Senha": hash_senha(p)}])
+                    salvar_aba(pd.concat([df_acessos, nova], ignore_index=True), "acessos")
+                    st.success("Cadastrado!")
     st.stop()
 
-# --- 4. CARREGAMENTO ---
+# --- 4. CARREGAMENTO PÓS-LOGIN ---
 user = st.session_state.usuario
-cols_financeiro = ["OS", "NF", "Data_Vencimento", "Ambiente", "Tipo_Fluxo", "Descricao", "Categoria", "Valor", "Status", "Cliente", "Usuario", "Cartao", "Detalhes"]
-
-if 'df' not in st.session_state: st.session_state.df = carregar_dados(ARQUIVO_DADOS, cols_financeiro)
-if 'cartoes' not in st.session_state: st.session_state.cartoes = carregar_dados(ARQUIVO_CARTOES, ["Nome", "Limite_Total", "Usuario"])
-if 'clientes' not in st.session_state: st.session_state.clientes = carregar_dados(ARQUIVO_CLIENTES, ["Nome", "Usuario"])
-
 df_user = st.session_state.df[st.session_state.df['Usuario'] == user]
 cartoes_user = st.session_state.cartoes[st.session_state.cartoes['Usuario'] == user]
 clientes_user = st.session_state.clientes[st.session_state.clientes['Usuario'] == user]
@@ -83,13 +114,12 @@ with tab_lanc:
                 status_sel = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"])
             obs_text = st.text_area("Observações")
             if st.button("Gravar", use_container_width=True):
-                # ID Aleatório oculto apenas para o sistema, para PF a gente usa a descrição no seletor
                 id_base = os_n if os_n.strip() != "" else datetime.now().strftime("%Y%m%d%H%M%S")
                 novos = []
                 for i in range(parc):
                     novos.append({"OS": id_base if parc==1 else f"{id_base}-{i+1}", "NF": nf_n, "Data_Vencimento": data_v + timedelta(days=30*i), "Ambiente": ambiente, "Tipo_Fluxo": tipo, "Descricao": desc, "Categoria": cat_sel, "Valor": val, "Status": status_sel, "Cliente": cli_sel, "Usuario": user, "Cartao": metodo, "Detalhes": obs_text})
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(novos)], ignore_index=True)
-                salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+                salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
 
     with col_g:
         df_ok = df_user[df_user['Status'] != "Recusado"]
@@ -115,7 +145,7 @@ with tab_lanc:
         df_pj_h = df_h[df_h['Ambiente'] == "Empresa"]
         st.dataframe(df_pj_h[["Data_Vencimento", "OS", "Status", "Cliente", "Valor"]], use_container_width=True, hide_index=True)
         if not df_pj_h.empty:
-            os_pj = st.selectbox("🔎 Detalhes da Nota (PJ):", ["---"] + df_pj_h["OS"].tolist(), key="sb_pj")
+            os_pj = st.selectbox("🔎 Detalhes (PJ):", ["---"] + df_pj_h["OS"].tolist(), key="sb_pj")
             if os_pj != "---":
                 det = df_pj_h[df_pj_h["OS"] == os_pj].iloc[0]
                 with st.container(border=True):
@@ -127,20 +157,16 @@ with tab_lanc:
                     st.info(f"**Obs:** {det['Detalhes']}")
                     if st.button("🗑️ Excluir Nota PJ", key="del_pj"):
                         st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pj]
-                        salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+                        salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
 
     with tab_pf:
         df_pf_h = df_h[df_h['Ambiente'] == "Pessoal"]
         st.dataframe(df_pf_h[["Data_Vencimento", "Descricao", "Status", "Categoria", "Valor"]], use_container_width=True, hide_index=True)
         if not df_pf_h.empty:
-            # ALTERAÇÃO: Agora o seletor mostra Descrição + Categoria para o pessoal
             df_pf_h['Exibicao'] = df_pf_h['Descricao'] + " (" + df_pf_h['Categoria'] + ")"
             selecao_pf = st.selectbox("🔎 Selecionar por Descrição (PF):", ["---"] + df_pf_h['Exibicao'].tolist(), key="sb_pf")
-            
             if selecao_pf != "---":
-                # Acha o registro pelo índice da exibição selecionada
-                idx_sel = df_pf_h[df_pf_h['Exibicao'] == selecao_pf].index[0]
-                det = df_pf_h.loc[idx_sel]
+                det = df_pf_h[df_pf_h['Exibicao'] == selecao_pf].iloc[0]
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
                     c1.write(f"**Valor:** R$ {det['Valor']:,.2f}"); c1.write(f"**NF:** {det['NF']}")
@@ -149,11 +175,10 @@ with tab_lanc:
                     st.write(f"**Descrição:** {det['Descricao']}")
                     st.info(f"**Obs:** {det['Detalhes']}")
                     if st.button("🗑️ Excluir Nota PF", key="del_pf"):
-                        # Exclui usando o ID interno (OS) que ainda existe por trás
-                        st.session_state.df = st.session_state.df.drop(idx_sel)
-                        salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+                        st.session_state.df = st.session_state.df[st.session_state.df["OS"] != det["OS"]]
+                        salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
 
-# --- ABAS CLIENTES E CARTÕES (SEM ALTERAÇÃO) ---
+# --- ABA CLIENTES ---
 with tab_clientes:
     c1, c2 = st.columns(2)
     with c1:
@@ -162,15 +187,15 @@ with tab_clientes:
             if st.form_submit_button("Cadastrar"):
                 if n_cli:
                     st.session_state.clientes = pd.concat([st.session_state.clientes, pd.DataFrame([{"Nome": n_cli, "Usuario": user}])], ignore_index=True)
-                    salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
+                    salvar_aba(st.session_state.clientes, "clientes"); st.rerun()
     with c2:
-        st.write("### Lista de Clientes")
         for idx, r in clientes_user.iterrows():
             col_n, col_b = st.columns([5, 1])
             col_n.markdown(f"#### {r['Nome']}")
             if col_b.button("🗑️", key=f"c_{idx}"):
-                st.session_state.clientes = st.session_state.clientes.drop(idx); salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
+                st.session_state.clientes = st.session_state.clientes.drop(idx); salvar_aba(st.session_state.clientes, "clientes"); st.rerun()
 
+# --- ABA CARTÕES ---
 with tab_cartoes:
     c1, c2 = st.columns(2)
     with c1:
@@ -178,9 +203,8 @@ with tab_cartoes:
             n_car, l_car = st.text_input("Cartão"), st.number_input("Limite Total", min_value=1.0)
             if st.form_submit_button("Cadastrar Cartão"):
                 st.session_state.cartoes = pd.concat([st.session_state.cartoes, pd.DataFrame([{"Nome": n_car, "Limite_Total": l_car, "Usuario": user}])], ignore_index=True)
-                salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
+                salvar_aba(st.session_state.cartoes, "cartoes"); st.rerun()
     with c2:
-        st.write("### Meus Cartões")
         for idx, r in cartoes_user.iterrows():
             col_n, col_b = st.columns([5, 1])
             col_n.markdown(f"#### 💳 {r['Nome']}")
@@ -189,22 +213,22 @@ with tab_cartoes:
             st.progress(max(0.0, min(u_gasto / limite, 1.0)))
             st.caption(f"**Limite:** R$ {limite:,.2f} | **Livre:** R$ {max(0.0, limite - u_gasto):,.2f}")
             if col_b.button("🗑️", key=f"cc_{idx}"):
-                st.session_state.cartoes = st.session_state.cartoes.drop(idx); salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
+                st.session_state.cartoes = st.session_state.cartoes.drop(idx); salvar_aba(st.session_state.cartoes, "cartoes"); st.rerun()
             st.divider()
 
+# --- RELATÓRIOS ---
 with tab_relat:
     df_v = df_user[df_user['Status'] != "Recusado"]
     if not df_v.empty:
-        st.subheader("📈 Gastos por Carteira")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("### 🏢 Empresa (PJ)")
             df_pj_rel = df_v[df_v['Ambiente'] == "Empresa"]
-            if not df_pj_rel.empty: st.plotly_chart(px.pie(df_pj_rel, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel).update_layout(margin=dict(t=30,b=0,l=0,r=0)), use_container_width=True)
+            if not df_pj_rel.empty: st.plotly_chart(px.pie(df_pj_rel, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
         with c2:
             st.markdown("### 🏠 Pessoal (PF)")
             df_pf_rel = df_v[df_v['Ambiente'] == "Pessoal"]
-            if not df_pf_rel.empty: st.plotly_chart(px.pie(df_pf_rel, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel).update_layout(margin=dict(t=30,b=0,l=0,r=0)), use_container_width=True)
+            if not df_pf_rel.empty: st.plotly_chart(px.pie(df_pf_rel, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
     else: st.info("Sem dados.")
 
 with tab_conf:
