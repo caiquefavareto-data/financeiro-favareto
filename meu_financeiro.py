@@ -99,46 +99,56 @@ with tab_lanc:
 
     st.divider()
     
-    # --- HISTÓRICO REFINADO ---
+    # --- HISTÓRICOS SEPARADOS ---
     st.subheader("📋 Resumo Financeiro")
-    
     col_busca, col_hist_check = st.columns([3, 1])
-    termo_busca = col_busca.text_input("🔎 Pesquisar nota (OS, Cliente, NF ou Descrição)")
-    ver_antigos = col_hist_check.checkbox("Ver Histórico")
+    termo_busca = col_busca.text_input("🔎 Pesquisar em todos os registros")
+    ver_antigos = col_hist_check.checkbox("Ver Tudo (Histórico)")
 
     df_h = df_user.copy().sort_values("Data_Vencimento", ascending=False)
-    
-    # Filtro de data e busca
     if not ver_antigos and not termo_busca:
         df_h = df_h[df_h['Data_Vencimento'] >= datetime.now().date().replace(day=1)]
     if termo_busca:
         df_h = df_h[df_h.astype(str).apply(lambda x: x.str.contains(termo_busca, case=False)).any(axis=1)]
+
+    # Divisão de Histórico
+    tab_pj, tab_pf = st.tabs(["🏢 Histórico Empresa (PJ)", "🏠 Histórico Pessoal (PF)"])
     
-    # Tabela de visualização rápida
-    st.dataframe(df_h[["Data_Vencimento", "OS", "Status", "Cliente", "Valor"]], use_container_width=True, hide_index=True)
-    
-    # PAINEL DE DETALHES (Só abre quando você seleciona)
-    if not df_h.empty:
-        os_detalhe = st.selectbox("👉 Selecione para abrir os detalhes completos:", ["---"] + df_h["OS"].tolist())
-        
-        if os_detalhe != "---":
-            det = df_h[df_h["OS"] == os_detalhe].iloc[0]
-            with st.container(border=True):
-                st.markdown(f"### Detalhes da OS: {det['OS']}")
-                c1, c2, c3 = st.columns(3)
-                c1.write(f"**Valor:** R$ {det['Valor']:,.2f}")
-                c1.write(f"**NF:** {det['NF']}")
-                c2.write(f"**Pagto:** {det['Cartao']}")
-                c2.write(f"**Categoria:** {det['Categoria']}")
-                c3.write(f"**Fluxo:** {det['Tipo_Fluxo']}")
-                c3.write(f"**Ambiente:** {det['Ambiente']}")
-                
-                st.write(f"**Descrição:** {det['Descricao']}")
-                st.info(f"**Observações:** {det['Detalhes']}")
-                
-                if st.button("🗑️ Excluir esta Nota"):
-                    st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_detalhe]
-                    salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+    with tab_pj:
+        df_pj_h = df_h[df_h['Ambiente'] == "Empresa"]
+        st.dataframe(df_pj_h[["Data_Vencimento", "OS", "Status", "Cliente", "Valor"]], use_container_width=True, hide_index=True)
+        if not df_pj_h.empty:
+            os_pj = st.selectbox("🔎 Detalhes da Nota (PJ):", ["---"] + df_pj_h["OS"].tolist(), key="sb_pj")
+            if os_pj != "---":
+                det = df_pj_h[df_pj_h["OS"] == os_pj].iloc[0]
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns(3)
+                    c1.write(f"**Valor:** R$ {det['Valor']:,.2f}"); c1.write(f"**NF:** {det['NF']}")
+                    c2.write(f"**Pagto:** {det['Cartao']}"); c2.write(f"**Categoria:** {det['Categoria']}")
+                    c3.write(f"**Fluxo:** {det['Tipo_Fluxo']}")
+                    st.write(f"**Descrição:** {det['Descricao']}")
+                    st.info(f"**Obs:** {det['Detalhes']}")
+                    if st.button("🗑️ Excluir Nota PJ", key="del_pj"):
+                        st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pj]
+                        salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+
+    with tab_pf:
+        df_pf_h = df_h[df_h['Ambiente'] == "Pessoal"]
+        st.dataframe(df_pf_h[["Data_Vencimento", "OS", "Status", "Cliente", "Valor"]], use_container_width=True, hide_index=True)
+        if not df_pf_h.empty:
+            os_pf = st.selectbox("🔎 Detalhes da Nota (PF):", ["---"] + df_pf_h["OS"].tolist(), key="sb_pf")
+            if os_pf != "---":
+                det = df_pf_h[df_pf_h["OS"] == os_pf].iloc[0]
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns(3)
+                    c1.write(f"**Valor:** R$ {det['Valor']:,.2f}"); c1.write(f"**NF:** {det['NF']}")
+                    c2.write(f"**Pagto:** {det['Cartao']}"); c2.write(f"**Categoria:** {det['Categoria']}")
+                    c3.write(f"**Fluxo:** {det['Tipo_Fluxo']}")
+                    st.write(f"**Descrição:** {det['Descricao']}")
+                    st.info(f"**Obs:** {det['Detalhes']}")
+                    if st.button("🗑️ Excluir Nota PF", key="del_pf"):
+                        st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pf]
+                        salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
 
 # --- ABA CLIENTES ---
 with tab_clientes:
@@ -163,8 +173,8 @@ with tab_cartoes:
     c1, c2 = st.columns(2)
     with c1:
         with st.form("car", clear_on_submit=True):
-            n_car, l_car = st.text_input("Cartão"), st.number_input("Limite", min_value=1.0)
-            if st.form_submit_button("Cadastrar"):
+            n_car, l_car = st.text_input("Cartão"), st.number_input("Limite Total", min_value=1.0)
+            if st.form_submit_button("Cadastrar Cartão"):
                 st.session_state.cartoes = pd.concat([st.session_state.cartoes, pd.DataFrame([{"Nome": n_car, "Limite_Total": l_car, "Usuario": user}])], ignore_index=True)
                 salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
     with c2:
@@ -172,19 +182,29 @@ with tab_cartoes:
         for idx, r in cartoes_user.iterrows():
             col_n, col_b = st.columns([5, 1])
             col_n.markdown(f"#### 💳 {r['Nome']}")
+            u_gasto = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)') & (df_user['Status'] != 'Recusado')]['Valor'].sum()
+            limite = float(r['Limite_Total'])
+            st.progress(max(0.0, min(u_gasto / limite, 1.0)))
+            st.caption(f"**Limite:** R$ {limite:,.2f} | **Livre:** R$ {max(0.0, limite - u_gasto):,.2f}")
             if col_b.button("🗑️", key=f"cc_{idx}"):
                 st.session_state.cartoes = st.session_state.cartoes.drop(idx); salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
-            u_gasto = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)')]['Valor'].sum()
-            st.progress(max(0.0, min(u_gasto / r['Limite_Total'], 1.0)))
+            st.divider()
 
-# --- RELATÓRIOS ---
 with tab_relat:
     df_v = df_user[df_user['Status'] != "Recusado"]
     if not df_v.empty:
-        st.plotly_chart(px.pie(df_v, values='Valor', names='Tipo_Fluxo', hole=.5, title="Balanço Geral", color_discrete_map={'Entrada (Recebimento)': '#2ECC71', 'Saída (Pagamento)': '#E74C3C'}))
-    else: st.info("Sem dados para relatório.")
+        st.subheader("📈 Gastos por Carteira")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("### 🏢 Empresa (PJ)")
+            df_pj_rel = df_v[df_v['Ambiente'] == "Empresa"]
+            if not df_pj_rel.empty: st.plotly_chart(px.pie(df_pj_rel, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel).update_layout(margin=dict(t=30,b=0,l=0,r=0)), use_container_width=True)
+        with c2:
+            st.markdown("### 🏠 Pessoal (PF)")
+            df_pf_rel = df_v[df_v['Ambiente'] == "Pessoal"]
+            if not df_pf_rel.empty: st.plotly_chart(px.pie(df_pf_rel, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel).update_layout(margin=dict(t=30,b=0,l=0,r=0)), use_container_width=True)
+    else: st.info("Sem dados.")
 
-# --- OPÇÕES ---
 with tab_conf:
     if st.button("Sair"):
         st.session_state.clear(); st.rerun()
