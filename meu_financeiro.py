@@ -83,6 +83,7 @@ with tab_lanc:
                 status_sel = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"])
             obs_text = st.text_area("Observações")
             if st.button("Gravar", use_container_width=True):
+                # ID Aleatório oculto apenas para o sistema, para PF a gente usa a descrição no seletor
                 id_base = os_n if os_n.strip() != "" else datetime.now().strftime("%Y%m%d%H%M%S")
                 novos = []
                 for i in range(parc):
@@ -98,21 +99,17 @@ with tab_lanc:
         st.plotly_chart(px.pie(df_user, values='Valor', names='Status', hole=.6, color='Status', color_discrete_map={'Concluído':'#00CC96', 'Pendente':'#FFA15A', 'Recusado':'#EF553B'}).update_layout(showlegend=False, height=140, margin=dict(t=0,b=0,l=0,r=0)), use_container_width=True)
 
     st.divider()
-    
-    # --- HISTÓRICOS SEPARADOS ---
     st.subheader("📋 Resumo Financeiro")
     col_busca, col_hist_check = st.columns([3, 1])
-    termo_busca = col_busca.text_input("🔎 Pesquisar em todos os registros")
-    ver_antigos = col_hist_check.checkbox("Ver Tudo (Histórico)")
-
+    termo_busca = col_busca.text_input("🔎 Pesquisar")
+    ver_antigos = col_hist_check.checkbox("Ver Tudo")
     df_h = df_user.copy().sort_values("Data_Vencimento", ascending=False)
     if not ver_antigos and not termo_busca:
         df_h = df_h[df_h['Data_Vencimento'] >= datetime.now().date().replace(day=1)]
     if termo_busca:
         df_h = df_h[df_h.astype(str).apply(lambda x: x.str.contains(termo_busca, case=False)).any(axis=1)]
 
-    # Divisão de Histórico
-    tab_pj, tab_pf = st.tabs(["🏢 Histórico Empresa (PJ)", "🏠 Histórico Pessoal (PF)"])
+    tab_pj, tab_pf = st.tabs(["🏢 Empresa (PJ)", "🏠 Pessoal (PF)"])
     
     with tab_pj:
         df_pj_h = df_h[df_h['Ambiente'] == "Empresa"]
@@ -134,11 +131,16 @@ with tab_lanc:
 
     with tab_pf:
         df_pf_h = df_h[df_h['Ambiente'] == "Pessoal"]
-        st.dataframe(df_pf_h[["Data_Vencimento", "OS", "Status", "Cliente", "Valor"]], use_container_width=True, hide_index=True)
+        st.dataframe(df_pf_h[["Data_Vencimento", "Descricao", "Status", "Categoria", "Valor"]], use_container_width=True, hide_index=True)
         if not df_pf_h.empty:
-            os_pf = st.selectbox("🔎 Detalhes da Nota (PF):", ["---"] + df_pf_h["OS"].tolist(), key="sb_pf")
-            if os_pf != "---":
-                det = df_pf_h[df_pf_h["OS"] == os_pf].iloc[0]
+            # ALTERAÇÃO: Agora o seletor mostra Descrição + Categoria para o pessoal
+            df_pf_h['Exibicao'] = df_pf_h['Descricao'] + " (" + df_pf_h['Categoria'] + ")"
+            selecao_pf = st.selectbox("🔎 Selecionar por Descrição (PF):", ["---"] + df_pf_h['Exibicao'].tolist(), key="sb_pf")
+            
+            if selecao_pf != "---":
+                # Acha o registro pelo índice da exibição selecionada
+                idx_sel = df_pf_h[df_pf_h['Exibicao'] == selecao_pf].index[0]
+                det = df_pf_h.loc[idx_sel]
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
                     c1.write(f"**Valor:** R$ {det['Valor']:,.2f}"); c1.write(f"**NF:** {det['NF']}")
@@ -147,10 +149,11 @@ with tab_lanc:
                     st.write(f"**Descrição:** {det['Descricao']}")
                     st.info(f"**Obs:** {det['Detalhes']}")
                     if st.button("🗑️ Excluir Nota PF", key="del_pf"):
-                        st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pf]
+                        # Exclui usando o ID interno (OS) que ainda existe por trás
+                        st.session_state.df = st.session_state.df.drop(idx_sel)
                         salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
 
-# --- ABA CLIENTES ---
+# --- ABAS CLIENTES E CARTÕES (SEM ALTERAÇÃO) ---
 with tab_clientes:
     c1, c2 = st.columns(2)
     with c1:
@@ -168,7 +171,6 @@ with tab_clientes:
             if col_b.button("🗑️", key=f"c_{idx}"):
                 st.session_state.clientes = st.session_state.clientes.drop(idx); salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
 
-# --- ABA CARTÕES ---
 with tab_cartoes:
     c1, c2 = st.columns(2)
     with c1:
