@@ -19,7 +19,7 @@ def carregar_dados(arquivo, colunas):
         df = pd.read_csv(arquivo)
         for col in colunas:
             if col not in df.columns:
-                df[col] = "Não" if col == "Cartao" else ("N/A" if col == "Cliente" else "")
+                df[col] = ""
         if not df.empty and 'Data_Vencimento' in df.columns:
             df['Data_Vencimento'] = pd.to_datetime(df['Data_Vencimento']).dt.date
         return df
@@ -31,228 +31,147 @@ def salvar_dados(df, arquivo):
 def hash_senha(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
-# --- 3. INTERFACE DE ENTRADA ---
-def tela_acesso():
-    if "autenticado" not in st.session_state:
-        st.markdown("<h1 style='text-align: center; color: #1E88E5;'>🏗️ Gestor Pro</h1>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 1.5, 1])
-        with col2:
-            st.markdown("---")
-            opcao = st.radio("Escolha uma opção:", ["Fazer Login", "Primeiro acesso?"], horizontal=True)
-            df_acessos = carregar_dados(ARQUIVO_ACESSOS, ["Usuario", "Senha"])
-
-            if opcao == "Fazer Login":
-                u_login = st.text_input("Usuário").strip()
-                p_login = st.text_input("Senha", type="password")
-                if st.button("Acessar Sistema", use_container_width=True):
-                    if u_login == "Caique" and p_login == "11":
-                        st.session_state.autenticado = True
-                        st.session_state.usuario = u_login
-                        st.rerun()
-                    sh = hash_senha(p_login)
-                    match = df_acessos[(df_acessos["Usuario"] == u_login) & (df_acessos["Senha"] == sh)]
-                    if not match.empty:
-                        st.session_state.autenticado = True
-                        st.session_state.usuario = u_login
-                        st.rerun()
-                    else: st.error("Usuário ou senha incorretos.")
+# --- 3. ACESSO ---
+if "autenticado" not in st.session_state:
+    st.markdown("<h1 style='text-align: center; color: #1E88E5;'>🏗️ Gestor Pro</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        opcao = st.radio("Escolha:", ["Login", "Cadastro"], horizontal=True)
+        df_acessos = carregar_dados(ARQUIVO_ACESSOS, ["Usuario", "Senha"])
+        u = st.text_input("Usuário").strip()
+        p = st.text_input("Senha", type="password")
+        if st.button("Entrar" if opcao == "Login" else "Cadastrar", use_container_width=True):
+            if opcao == "Login":
+                if (u == "Caique" and p == "11") or not df_acessos[(df_acessos["Usuario"] == u) & (df_acessos["Senha"] == hash_senha(p))].empty:
+                    st.session_state.autenticado, st.session_state.usuario = True, u
+                    st.rerun()
+                else: st.error("Erro no login.")
             else:
-                st.subheader("Cadastrar Novo Usuário")
-                u_novo = st.text_input("Escolha seu Nome").strip()
-                p_novo = st.text_input("Escolha sua Senha", type="password")
-                p_conf = st.text_input("Confirme a Senha", type="password")
-                if st.button("Salvar Cadastro", use_container_width=True):
-                    if u_novo and p_novo == p_conf:
-                        if u_novo in df_acessos["Usuario"].values: st.warning("Usuário já existe.")
-                        else:
-                            nova = pd.DataFrame([{"Usuario": u_novo, "Senha": hash_senha(p_novo)}])
-                            df_acessos = pd.concat([df_acessos, nova], ignore_index=True)
-                            salvar_dados(df_acessos, ARQUIVO_ACESSOS)
-                            st.success("Cadastrado! Mude para 'Fazer Login'.")
-                    else: st.error("Verifique os campos.")
-        return False
-    return True
+                if u and p:
+                    salvar_dados(pd.concat([df_acessos, pd.DataFrame([{"Usuario": u, "Senha": hash_senha(p)}])]), ARQUIVO_ACESSOS)
+                    st.success("Cadastrado!")
+    st.stop()
 
-if not tela_acesso(): st.stop()
-
-# --- 4. INICIALIZAÇÃO ---
+# --- 4. CARREGAMENTO ---
 user = st.session_state.usuario
-if 'df' not in st.session_state:
-    st.session_state.df = carregar_dados(ARQUIVO_DADOS, ["OS", "NF", "Data_Vencimento", "Ambiente", "Tipo_Fluxo", "Descricao", "Categoria", "Valor", "Status", "Cliente", "Usuario", "Cartao", "Detalhes"])
-if 'cartoes' not in st.session_state:
-    st.session_state.cartoes = carregar_dados(ARQUIVO_CARTOES, ["Nome", "Limite_Total", "Usuario"])
-if 'clientes' not in st.session_state:
-    st.session_state.clientes = carregar_dados(ARQUIVO_CLIENTES, ["Nome", "Usuario"])
+colunas_principais = ["OS", "NF", "Data_Vencimento", "Ambiente", "Tipo_Fluxo", "Descricao", "Categoria", "Valor", "Status", "Cliente", "Usuario", "Cartao", "Detalhes"]
+
+if 'df' not in st.session_state: st.session_state.df = carregar_dados(ARQUIVO_DADOS, colunas_principais)
+if 'cartoes' not in st.session_state: st.session_state.cartoes = carregar_dados(ARQUIVO_CARTOES, ["Nome", "Limite_Total", "Usuario"])
+if 'clientes' not in st.session_state: st.session_state.clientes = carregar_dados(ARQUIVO_CLIENTES, ["Nome", "Usuario"])
 
 df_user = st.session_state.df[st.session_state.df['Usuario'] == user]
 cartoes_user = st.session_state.cartoes[st.session_state.cartoes['Usuario'] == user]
 clientes_user = st.session_state.clientes[st.session_state.clientes['Usuario'] == user]
 
-# --- 5. INTERFACE PRINCIPAL ---
-st.markdown(f"#### 👤 Usuário: {user}")
+# --- 5. UI PRINCIPAL ---
+st.markdown(f"#### 👤 {user}")
 tab_lanc, tab_cartoes, tab_clientes, tab_relat, tab_conf = st.tabs(["📝 Lançamentos", "💳 Cartões", "👥 Clientes", "📈 Relatórios", "⚙️ Opções"])
 
 with tab_lanc:
     col_f, col_g = st.columns([2, 1])
     with col_f:
-        with st.expander("➕ Novo Registro", expanded=False):
+        with st.expander("➕ NOVO LANÇAMENTO (Entrada/Saída)", expanded=False):
             c1, c2 = st.columns(2)
             with c1:
-                ambiente = st.radio("Destino", ["Empresa", "Pessoal"], horizontal=True)
+                ambiente = st.radio("Carteira", ["Empresa", "Pessoal"], horizontal=True)
                 tipo = st.selectbox("Tipo", ["Saída (Pagamento)", "Entrada (Recebimento)"])
-                data_base = st.date_input("Vencimento", datetime.now())
-                os_num = st.text_input("Nº OS")
-                cliente_sel = st.selectbox("Cliente", ["N/A"] + sorted(clientes_user["Nome"].tolist()))
-                cat_opcoes = sorted(["Carro Combustível", "Carro Multa", "Carro Pedágio", "Escola", "Farmácia", "Imposto", "Manutenção Preventiva", "Material", "Mercado", "Pagamento", "Peças Elevador", "Outros"])
-                categoria_sel = st.selectbox("Categoria", cat_opcoes)
-                categoria_final = st.text_input("Especifique") if categoria_sel == "Outros" else categoria_sel
+                data_v = st.date_input("Vencimento", datetime.now())
+                os_n = st.text_input("Nº OS")
+                cli = st.selectbox("Cliente", ["N/A"] + sorted(clientes_user["Nome"].tolist()))
+                cat = st.selectbox("Categoria", sorted(["Carro", "Escola", "Imposto", "Material", "Peças", "Mercado", "Retirada", "Outros"]))
             with c2:
-                nf_num = st.text_input("Nº NF")
-                descricao = st.text_input("Descrição")
-                valor_parc = st.number_input("Valor (R$)", min_value=0.0)
-                qtd_parcelas = st.number_input("Parcelas", min_value=1, value=1)
-                metodos = ["Pix", "Boleto", "Transferência", "Dinheiro"]
-                pag_cartao = st.selectbox("Pagto/Cartão", metodos + cartoes_user["Nome"].tolist())
+                nf_n = st.text_input("Nº NF")
+                desc = st.text_input("O que é?")
+                val = st.number_input("Valor R$", min_value=0.0)
+                parc = st.number_input("Parcelas", min_value=1, value=1)
+                metodo = st.selectbox("Forma de Pagto", ["Pix", "Boleto", "Dinheiro", "Débito"] + cartoes_user["Nome"].tolist())
                 status = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"])
             
-            detalhes = st.text_area("Observações")
-            if st.button("Gravar Registro", use_container_width=True):
-                id_base = os_num if os_num.strip() != "" else datetime.now().strftime("%Y%m%d%H%M%S")
+            # CAMPO DE OBSERVAÇÃO QUE TINHA SUMIDO
+            obs = st.text_area("Observações Adicionais (Detalhes do serviço, etc)")
+            
+            if st.button("Salvar Registro", use_container_width=True):
                 novos = []
-                for i in range(qtd_parcelas):
-                    data_parc = data_base + timedelta(days=30*i)
-                    novos.append({"OS": id_base if qtd_parcelas == 1 else f"{id_base}-{i+1}", "NF": nf_num, "Data_Vencimento": data_parc, "Ambiente": ambiente, "Tipo_Fluxo": tipo, "Descricao": descricao, "Categoria": categoria_final, "Valor": valor_parc, "Status": status, "Cliente": cliente_sel, "Usuario": user, "Cartao": pag_cartao, "Detalhes": detalhes})
+                for i in range(parc):
+                    novos.append({"OS": os_n if parc==1 else f"{os_n}-{i+1}", "NF": nf_n, "Data_Vencimento": data_v + timedelta(days=30*i), "Ambiente": ambiente, "Tipo_Fluxo": tipo, "Descricao": desc, "Categoria": cat, "Valor": val, "Status": status, "Cliente": cli, "Usuario": user, "Cartao": metodo, "Detalhes": obs})
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(novos)], ignore_index=True)
                 salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
 
     with col_g:
-        if not df_user.empty:
-            df_at = df_user[df_user['Status'] != "Recusado"]
-            df_emp = df_at[df_at['Ambiente'] == "Empresa"]
-            saldo_emp = df_emp[df_emp['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_emp[df_emp['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
-            df_pes = df_at[df_at['Ambiente'] == "Pessoal"]
-            saldo_pes = df_pes[df_pes['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_pes[df_pes['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
-            
-            st.metric("Saldo Empresa (PJ)", f"R$ {saldo_emp:,.2f}")
-            st.metric("Saldo Pessoal (PF)", f"R$ {saldo_pes:,.2f}")
-            
-            fig = px.pie(df_user, values='Valor', names='Status', hole=.6, color='Status', color_discrete_map={'Concluído':'#00CC96', 'Pendente':'#FFA15A', 'Recusado':'#EF553B'})
-            fig.update_layout(showlegend=False, height=140, margin=dict(t=0,b=0,l=0,r=0)); st.plotly_chart(fig, use_container_width=True)
+        df_ok = df_user[df_user['Status'] != "Recusado"]
+        s_pj = df_ok[df_ok['Ambiente'] == "Empresa"][df_ok['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_ok[df_ok['Ambiente'] == "Empresa"][df_ok['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
+        s_pf = df_ok[df_ok['Ambiente'] == "Pessoal"][df_ok['Tipo_Fluxo'] == 'Entrada (Recebimento)']['Valor'].sum() - df_ok[df_ok['Ambiente'] == "Pessoal"][df_ok['Tipo_Fluxo'] == 'Saída (Pagamento)']['Valor'].sum()
+        st.metric("Saldo Empresa", f"R$ {s_pj:,.2f}"); st.metric("Saldo Pessoal", f"R$ {s_pf:,.2f}")
 
     st.divider()
-    c_busca, c_filtro, c_hist = st.columns([2, 1, 1])
-    with c_busca: termo_b = st.text_input("🔍 Pesquisa (OS, NF ou Cliente)")
-    with c_filtro: v_opt = st.radio("Filtro:", ["Tudo", "Empresa", "Pessoal"], horizontal=True)
-    with c_hist: m_hist = st.checkbox("Histórico Antigo")
+    
+    # --- HISTÓRICO COMPLETO ---
+    st.subheader("📋 Histórico e Detalhes")
+    c_busca, c_filtro = st.columns([3, 1])
+    busca = c_busca.text_input("🔎 Pesquisar em tudo (OS, Cliente, Obs...)")
+    ver_tudo = c_filtro.checkbox("Ver Histórico Antigo")
+    
+    df_h = df_user.copy().sort_values("Data_Vencimento", ascending=False)
+    if not ver_tudo and not busca:
+        df_h = df_h[df_h['Data_Vencimento'] >= datetime.now().date().replace(day=1)]
+    if busca:
+        df_h = df_h[df_h.astype(str).apply(lambda x: x.str.contains(busca, case=False)).any(axis=1)]
+    
+    # Exibição do Histórico
+    if not df_h.empty:
+        # Tabela interativa: Aqui você vê tudo de uma vez
+        st.dataframe(df_h, use_container_width=True, hide_index=True)
+        
+        # Botão para excluir
+        with st.expander("🗑️ Excluir Registros"):
+            os_para_deletar = st.multiselect("Selecione a OS para apagar:", df_h["OS"].unique())
+            if st.button("Confirmar Exclusão"):
+                st.session_state.df = st.session_state.df[~st.session_state.df["OS"].isin(os_para_deletar)]
+                salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
+    else:
+        st.info("Nenhum registro encontrado para este filtro.")
 
-    hoje = datetime.now().date()
-    df_t = df_user.copy().sort_values(by="Data_Vencimento")
-    if not termo_b and not m_hist: df_t = df_t[df_t['Data_Vencimento'] >= hoje.replace(day=1)]
-    if v_opt != "Tudo": df_t = df_t[df_t['Ambiente'] == v_opt]
-    if termo_b: df_t = df_t[(df_t['OS'].astype(str).str.contains(termo_b, case=False)) | (df_t['NF'].astype(str).str.contains(termo_b, case=False)) | (df_t['Cliente'].astype(str).str.contains(termo_b, case=False))]
-
-    col_tab, col_ed = st.columns([2, 1])
-    with col_tab:
-        df_disp = df_t.copy(); df_disp.insert(0, "Sel.", False)
-        edit = st.data_editor(df_disp[["Sel.", "Data_Vencimento", "OS", "Status", "Cliente", "Descricao", "Valor"]], hide_index=True, use_container_width=True)
-        if st.button("🗑️ Excluir Selecionados"):
-            oss_r = edit[edit["Sel."] == True]["OS"].tolist()
-            st.session_state.df = st.session_state.df[~st.session_state.df["OS"].isin(oss_r)]
-            salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
-
-    with col_ed:
-        st.subheader("📑 Edição")
-        os_sel = st.selectbox("Escolha a OS:", ["---"] + df_t["OS"].tolist(), key="sb_os_edicao")
-        if os_sel != "---":
-            inf = df_user[df_user["OS"] == os_sel].iloc[0]
-            with st.container(border=True):
-                nv_venc = st.date_input("Vencimento", inf['Data_Vencimento'], key=f"date_{os_sel}")
-                nv_val = st.number_input("Valor", value=float(inf['Valor']), key=f"val_{os_sel}")
-                nv_st = st.selectbox("Status", ["Pendente", "Concluído", "Recusado"], index=["Pendente", "Concluído", "Recusado"].index(inf['Status']), key=f"status_{os_sel}")
-                if st.button("Confirmar", use_container_width=True, key=f"btn_{os_sel}"):
-                    idx = st.session_state.df[st.session_state.df["OS"] == os_sel].index
-                    st.session_state.df.at[idx[0], "Data_Vencimento"], st.session_state.df.at[idx[0], "Valor"], st.session_state.df.at[idx[0], "Status"] = nv_venc, nv_val, nv_st
-                    salvar_dados(st.session_state.df, ARQUIVO_DADOS); st.rerun()
-                st.info(inf['Detalhes'])
-
-# --- 👥 ABA CLIENTES ATUALIZADA (COM EXCLUSÃO) ---
+# --- CLIENTES ---
 with tab_clientes:
-    c1, c2 = st.columns([1, 2])
+    c1, c2 = st.columns(2)
     with c1:
-        with st.form("add_cli"):
-            n_c = st.text_input("Novo Condomínio/Cliente")
-            if st.form_submit_button("✅ Cadastrar"):
-                if n_c:
-                    new = pd.DataFrame([{"Nome": n_c, "Usuario": user}])
-                    st.session_state.clientes = pd.concat([st.session_state.clientes, new], ignore_index=True)
-                    salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
-    with c2:
-        st.subheader("Gerenciar Clientes")
-        if not clientes_user.empty:
-            df_cli_ed = clientes_user.copy()
-            df_cli_ed.insert(0, "Apagar", False)
-            edit_cli = st.data_editor(df_cli_ed[["Apagar", "Nome"]], hide_index=True, use_container_width=True)
-            if st.button("🗑️ Remover Clientes Selecionados"):
-                clis_para_remover = edit_cli[edit_cli["Apagar"] == True]["Nome"].tolist()
-                st.session_state.clientes = st.session_state.clientes[~(st.session_state.clientes["Nome"].isin(clis_para_remover) & (st.session_state.clientes["Usuario"] == user))]
+        with st.form("cli"):
+            n = st.text_input("Nome Cliente")
+            if st.form_submit_button("Cadastrar"):
+                st.session_state.clientes = pd.concat([st.session_state.clientes, pd.DataFrame([{"Nome": n, "Usuario": user}])], ignore_index=True)
                 salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
-        else: st.info("Nenhum cliente cadastrado.")
+    with c2:
+        for idx, r in clientes_user.iterrows():
+            col_a, col_b = st.columns([3, 1])
+            col_a.write(r['Nome'])
+            if col_b.button("Remover", key=f"c_{idx}"):
+                st.session_state.clientes = st.session_state.clientes.drop(idx); salvar_dados(st.session_state.clientes, ARQUIVO_CLIENTES); st.rerun()
 
-# --- 💳 ABA CARTÕES ATUALIZADA (COM EXCLUSÃO) ---
+# --- CARTÕES ---
 with tab_cartoes:
-    c1, c2 = st.columns([1, 2])
+    c1, c2 = st.columns(2)
     with c1:
-        with st.form("add_card"):
-            n = st.text_input("Nome do Cartão")
-            l = st.number_input("Limite Total", min_value=1.0, value=1000.0)
-            if st.form_submit_button("✅ Adicionar"):
-                new = pd.DataFrame([{"Nome": n, "Limite_Total": l, "Usuario": user}])
-                st.session_state.cartoes = pd.concat([st.session_state.cartoes, new], ignore_index=True)
+        with st.form("car"):
+            n, l = st.text_input("Cartão"), st.number_input("Limite", min_value=1.0)
+            if st.form_submit_button("Cadastrar"):
+                st.session_state.cartoes = pd.concat([st.session_state.cartoes, pd.DataFrame([{"Nome": n, "Limite_Total": l, "Usuario": user}])], ignore_index=True)
                 salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
     with c2:
-        st.subheader("Meus Cartões")
-        if not cartoes_user.empty:
-            # Layout para exclusão de cartões
-            df_car_ed = cartoes_user.copy()
-            df_car_ed.insert(0, "Apagar", False)
-            edit_car = st.data_editor(df_car_ed[["Apagar", "Nome", "Limite_Total"]], hide_index=True, use_container_width=True)
-            
-            if st.button("🗑️ Remover Cartões Selecionados"):
-                cars_para_remover = edit_car[edit_car["Apagar"] == True]["Nome"].tolist()
-                st.session_state.cartoes = st.session_state.cartoes[~(st.session_state.cartoes["Nome"].isin(cars_para_remover) & (st.session_state.cartoes["Usuario"] == user))]
-                salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
-            
-            st.divider()
-            # Visualização das barras de limite
-            for _, r in cartoes_user.iterrows():
-                u = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Status'] != 'Recusado') & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)')]['Valor'].sum()
-                limite = r['Limite_Total'] if r['Limite_Total'] > 0 else 1.0
-                progresso = max(0.0, min(u / limite, 1.0))
-                st.write(f"**{r['Nome']}**")
-                st.progress(progresso)
-                st.caption(f"Livre: R$ {max(0.0, r['Limite_Total']-u):,.2f}")
-        else: st.info("Nenhum cartão cadastrado.")
+        for idx, r in cartoes_user.iterrows():
+            col_a, col_b = st.columns([3, 1])
+            col_a.write(f"💳 {r['Nome']}")
+            if col_b.button("Remover", key=f"cc_{idx}"):
+                st.session_state.cartoes = st.session_state.cartoes.drop(idx); salvar_dados(st.session_state.cartoes, ARQUIVO_CARTOES); st.rerun()
+            u = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)')]['Valor'].sum()
+            st.progress(max(0.0, min(u / r['Limite_Total'], 1.0)))
 
-# --- 📈 ABA RELATÓRIOS ---
+# --- RELATÓRIOS ---
 with tab_relat:
-    st.subheader("📊 Resumo de Entradas vs Saídas")
     df_v = df_user[df_user['Status'] != "Recusado"]
     if not df_v.empty:
-        fig_balanco = px.pie(df_v, values='Valor', names='Tipo_Fluxo', hole=.5, color='Tipo_Fluxo', color_discrete_map={'Entrada (Recebimento)': '#2ECC71', 'Saída (Pagamento)': '#E74C3C'}, title="Balanço Geral: Recebido vs Gasto")
-        st.plotly_chart(fig_balanco, use_container_width=True)
-        st.divider()
-        st.subheader("💸 Gastos por Categoria (Saídas)")
-        c_e, c_p = st.columns(2)
-        df_saidas = df_v[df_v['Tipo_Fluxo'] == 'Saída (Pagamento)']
-        cores_vibrantes = px.colors.qualitative.Bold
-        with c_e:
-            df_m = df_saidas[df_saidas['Ambiente'] == "Empresa"]
-            if not df_m.empty: st.plotly_chart(px.pie(df_m, values='Valor', names='Categoria', hole=.4, title="Empresa (Gastos)", color_discrete_sequence=cores_vibrantes), use_container_width=True)
-        with c_p:
-            df_h = df_saidas[df_saidas['Ambiente'] == "Pessoal"]
-            if not df_h.empty: st.plotly_chart(px.pie(df_h, values='Valor', names='Categoria', hole=.4, title="Pessoal (Gastos)", color_discrete_sequence=cores_vibrantes), use_container_width=True)
-    else: st.warning("Nenhum dado encontrado.")
+        st.plotly_chart(px.pie(df_v, values='Valor', names='Tipo_Fluxo', hole=.5, title="Balanço", color_discrete_map={'Entrada (Recebimento)': '#2ECC71', 'Saída (Pagamento)': '#E74C3C'}))
+    else: st.info("Sem dados.")
 
 with tab_conf:
-    if st.button("🚪 Sair"):
-        del st.session_state.autenticado; st.rerun()
+    if st.button("Logoff"): st.session_state.clear(); st.rerun()
