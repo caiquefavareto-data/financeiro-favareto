@@ -13,15 +13,22 @@ def conectar_google_sheets():
     client = gspread.authorize(creds)
     return client.open("Banco_Dados_Gestor_Pro")
 
-# --- 2. FUNÇÕES DE DADOS ---
+# --- 2. FUNÇÕES DE DADOS (COM CONVERSÃO NUMÉRICA) ---
 def carregar_aba(aba_nome, colunas):
     try:
         sh = conectar_google_sheets()
         worksheet = sh.worksheet(aba_nome)
         df = pd.DataFrame(worksheet.get_all_records())
         if df.empty: return pd.DataFrame(columns=colunas)
+        
+        # Converte Datas
         if 'Data_Vencimento' in df.columns:
             df['Data_Vencimento'] = pd.to_datetime(df['Data_Vencimento'], errors='coerce').dt.date
+        
+        # FORÇA VALOR A SER NÚMERO (Resolve erro do gráfico)
+        if 'Valor' in df.columns:
+            df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
+            
         return df
     except:
         return pd.DataFrame(columns=colunas)
@@ -32,21 +39,17 @@ def salvar_aba(df, aba_nome):
     worksheet.clear()
     df_save = df.copy()
     for col in df_save.columns:
-        if 'date' in col.lower() or df_save[col].dtype == 'object':
-            df_save[col] = df_save[col].astype(str)
+        df_save[col] = df_save[col].astype(str)
     worksheet.update([df_save.columns.values.tolist()] + df_save.values.tolist())
+    # Limpa o cache da sessão para forçar recarregamento
+    if 'df' in st.session_state: del st.session_state.df
 
 def hash_senha(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="Gestor Pro - Elevadores", layout="wide")
-
 cols_fin = ["OS", "NF", "Data_Vencimento", "Ambiente", "Tipo_Fluxo", "Descricao", "Categoria", "Valor", "Status", "Cliente", "Usuario", "Cartao", "Detalhes"]
-
-if 'df' not in st.session_state: st.session_state.df = carregar_aba("lancamentos", cols_fin)
-if 'cartoes' not in st.session_state: st.session_state.cartoes = carregar_aba("cartoes", ["Nome", "Limite_Total", "Usuario"])
-if 'clientes' not in st.session_state: st.session_state.clientes = carregar_aba("clientes", ["Nome", "Usuario"])
 
 # --- 3. ACESSO ---
 if "autenticado" not in st.session_state:
@@ -57,23 +60,26 @@ if "autenticado" not in st.session_state:
         df_acessos = carregar_aba("acessos", ["Usuario", "Senha"])
         u = st.text_input("Usuário").strip()
         p = st.text_input("Senha", type="password")
-        if st.button("Acessar" if opcao == "Login" else "Cadastrar", use_container_width=True):
+        if st.button("Acessar", use_container_width=True):
             if (u == "Caique" and p == "11") or not df_acessos[(df_acessos["Usuario"] == u) & (df_acessos["Senha"] == hash_senha(p))].empty:
                 st.session_state.autenticado, st.session_state.usuario = True, u
                 st.rerun()
             else: st.error("Erro no login.")
     st.stop()
 
-# --- 4. CARREGAMENTO PÓS-LOGIN ---
+# --- 4. CARREGAMENTO DE DADOS ---
 user = st.session_state.usuario
+if 'df' not in st.session_state: st.session_state.df = carregar_aba("lancamentos", cols_fin)
+if 'cartoes' not in st.session_state: st.session_state.cartoes = carregar_aba("cartoes", ["Nome", "Limite_Total", "Usuario"])
+if 'clientes' not in st.session_state: st.session_state.clientes = carregar_aba("clientes", ["Nome", "Usuario"])
+
 df_user = st.session_state.df[st.session_state.df['Usuario'] == user]
 cartoes_user = st.session_state.cartoes[st.session_state.cartoes['Usuario'] == user]
 clientes_user = st.session_state.clientes[st.session_state.clientes['Usuario'] == user]
 
-st.markdown(f"#### 👤 {user}")
+# --- 5. UI PRINCIPAL ---
 tab_lanc, tab_cartoes, tab_clientes, tab_relat, tab_conf = st.tabs(["📝 Lançamentos", "💳 Cartões", "👥 Clientes", "📈 Relatórios", "⚙️ Opções"])
 
-# --- TAB LANÇAMENTOS ---
 with tab_lanc:
     col_f, col_g = st.columns([2, 1])
     with col_f:
@@ -112,55 +118,42 @@ with tab_lanc:
 
     st.divider()
     st.subheader("📋 Resumo Financeiro")
-    col_b, col_h = st.columns([3, 1])
-    termo = col_b.text_input("🔎 Pesquisar nota")
-    ver_antigos = col_h.checkbox("Ver Histórico")
-    df_h = df_user.copy().sort_values("Data_Vencimento", ascending=False)
-    if not ver_antigos and not termo: df_h = df_h[df_h['Data_Vencimento'] >= datetime.now().date().replace(day=1)]
-    if termo: df_h = df_h[df_h.astype(str).apply(lambda x: x.str.contains(termo, case=False)).any(axis=1)]
-
     t_pj, t_pf = st.tabs(["🏢 Empresa (PJ)", "🏠 Pessoal (PF)"])
     with t_pj:
-        df_pj_h = df_h[df_h['Ambiente'] == "Empresa"]
+        df_pj_h = df_user[df_user['Ambiente'] == "Empresa"].sort_values("Data_Vencimento", ascending=False)
         st.dataframe(df_pj_h[["Data_Vencimento", "OS", "Status", "Cliente", "Valor"]], use_container_width=True, hide_index=True)
-        if not df_pj_h.empty:
-            os_pj = st.selectbox("🔎 Detalhes (PJ):", ["---"] + df_pj_h["OS"].tolist(), key="sb_pj")
-            if os_pj != "---":
-                det = df_pj_h[df_pj_h["OS"] == os_pj].iloc[0]
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns(3)
-                    c1.write(f"**Valor:** R$ {float(det['Valor']):,.2f}"); c2.write(f"**Pagto:** {det['Cartao']}"); c3.write(f"**NF:** {det['NF']}")
-                    st.write(f"**Descrição:** {det['Descricao']}"); st.info(f"**Obs:** {det['Detalhes']}")
-                    if st.button("🗑️ Excluir Nota PJ", key="del_pj"):
-                        st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pj]
-                        salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
+        os_pj = st.selectbox("🔎 Detalhes (PJ):", ["---"] + df_pj_h["OS"].tolist(), key="sb_pj")
+        if os_pj != "---":
+            det = df_pj_h[df_pj_h["OS"] == os_pj].iloc[0]
+            with st.container(border=True):
+                st.write(f"**Valor:** R$ {float(det['Valor']):,.2f} | **Pagto:** {det['Cartao']}")
+                st.write(f"**Descrição:** {det['Descricao']}"); st.info(f"**Obs:** {det['Detalhes']}")
+                if st.button("🗑️ Excluir PJ", key="del_pj"):
+                    st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pj]
+                    salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
     with t_pf:
-        # CORREÇÃO DEFINITIVA DO TYPEERROR
-        df_pf_h = df_h[df_h['Ambiente'] == "Pessoal"].copy()
+        df_pf_h = df_user[df_user['Ambiente'] == "Pessoal"].copy().sort_values("Data_Vencimento", ascending=False)
         st.dataframe(df_pf_h[["Data_Vencimento", "Descricao", "Status", "Categoria", "Valor"]], use_container_width=True, hide_index=True)
         if not df_pf_h.empty:
             df_pf_h['Exibicao'] = df_pf_h['Descricao'].astype(str) + " (" + df_pf_h['Categoria'].astype(str) + ")"
-            sel_pf = st.selectbox("🔎 Selecionar por Descrição (PF):", ["---"] + df_pf_h['Exibicao'].tolist(), key="sb_pf")
+            sel_pf = st.selectbox("🔎 Detalhes (PF):", ["---"] + df_pf_h['Exibicao'].tolist(), key="sb_pf")
             if sel_pf != "---":
                 det = df_pf_h[df_pf_h['Exibicao'] == sel_pf].iloc[0]
                 with st.container(border=True):
-                    c1, c2, c3 = st.columns(3)
-                    c1.write(f"**Valor:** R$ {float(det['Valor']):,.2f}"); c2.write(f"**Pagto:** {det['Cartao']}"); c3.write(f"**Categoria:** {det['Categoria']}")
-                    st.write(f"**Descrição:** {det['Descricao']}"); st.info(f"**Obs:** {det['Detalhes']}")
-                    if st.button("🗑️ Excluir Nota PF", key="del_pf"):
+                    st.write(f"**Valor:** R$ {float(det['Valor']):,.2f} | **Pagto:** {det['Cartao']}")
+                    st.info(f"**Obs:** {det['Detalhes']}")
+                    if st.button("🗑️ Excluir PF", key="del_pf"):
                         st.session_state.df = st.session_state.df[st.session_state.df["OS"] != det["OS"]]
                         salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
 
-# --- ABA CLIENTES ---
 with tab_clientes:
     c1, c2 = st.columns(2)
     with c1:
         with st.form("cli", clear_on_submit=True):
             n_cli = st.text_input("Novo Cliente")
             if st.form_submit_button("Cadastrar"):
-                if n_cli:
-                    st.session_state.clientes = pd.concat([st.session_state.clientes, pd.DataFrame([{"Nome": n_cli, "Usuario": user}])], ignore_index=True)
-                    salvar_aba(st.session_state.clientes, "clientes"); st.rerun()
+                st.session_state.clientes = pd.concat([st.session_state.clientes, pd.DataFrame([{"Nome": n_cli, "Usuario": user}])], ignore_index=True)
+                salvar_aba(st.session_state.clientes, "clientes"); st.rerun()
     with c2:
         for idx, r in clientes_user.iterrows():
             col_n, col_b = st.columns([5, 1])
@@ -168,12 +161,11 @@ with tab_clientes:
             if col_b.button("🗑️", key=f"c_{idx}"):
                 st.session_state.clientes = st.session_state.clientes.drop(idx); salvar_aba(st.session_state.clientes, "clientes"); st.rerun()
 
-# --- ABA CARTÕES ---
 with tab_cartoes:
     c1, c2 = st.columns(2)
     with c1:
         with st.form("car", clear_on_submit=True):
-            n_car, l_car = st.text_input("Cartão"), st.number_input("Limite Total", min_value=1.0)
+            n_car, l_car = st.text_input("Cartão"), st.number_input("Limite", min_value=1.0)
             if st.form_submit_button("Adicionar"):
                 st.session_state.cartoes = pd.concat([st.session_state.cartoes, pd.DataFrame([{"Nome": n_car, "Limite_Total": l_car, "Usuario": user}])], ignore_index=True)
                 salvar_aba(st.session_state.cartoes, "cartoes"); st.rerun()
@@ -184,28 +176,31 @@ with tab_cartoes:
             u_gasto = df_user[(df_user['Cartao'] == r['Nome']) & (df_user['Tipo_Fluxo'] == 'Saída (Pagamento)') & (df_user['Status'] != 'Recusado')]['Valor'].sum()
             limite = float(r['Limite_Total'])
             st.progress(max(0.0, min(u_gasto / limite, 1.0)))
-            st.caption(f"**Limite:** R$ {limite:,.2f} | **Livre:** R$ {max(0.0, limite - u_gasto):,.2f}")
+            st.caption(f"**Livre:** R$ {max(0.0, limite - u_gasto):,.2f}")
             if col_b.button("🗑️", key=f"cc_{idx}"):
                 st.session_state.cartoes = st.session_state.cartoes.drop(idx); salvar_aba(st.session_state.cartoes, "cartoes"); st.rerun()
-            st.divider()
 
-# --- RELATÓRIOS ---
+# --- ABA RELATÓRIOS (COM SINCRONIA REAL) ---
 with tab_relat:
-    st.session_state.df = carregar_aba("lancamentos", cols_fin)
-    df_user = st.session_state.df[st.session_state.df['Usuario'] == user]
-    df_v = df_user[df_user['Status'] != "Recusado"]
+    if st.button("🔄 Sincronizar"):
+        st.session_state.df = carregar_aba("lancamentos", cols_fin)
+        st.rerun()
+    
+    df_v = df_user[(df_user['Status'] != "Recusado") & (df_user['Valor'] > 0)].copy()
     if not df_v.empty:
-        c1, c2 = st.columns(2)
-        with c1:
+        st.plotly_chart(px.pie(df_v, values='Valor', names='Tipo_Fluxo', hole=.5, title="Entradas vs Saídas", color='Tipo_Fluxo', color_discrete_map={'Entrada (Recebimento)': '#2ECC71', 'Saída (Pagamento)': '#E74C3C'}), use_container_width=True)
+        st.divider()
+        col_pj, col_pf = st.columns(2)
+        df_gastos = df_v[df_v['Tipo_Fluxo'] == 'Saída (Pagamento)']
+        with col_pj:
             st.markdown("### 🏢 Empresa (PJ)")
-            df_pj_r = df_v[df_v['Ambiente'] == "Empresa"]
-            if not df_pj_r.empty: st.plotly_chart(px.pie(df_pj_r, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
-        with c2:
+            df_pj_r = df_gastos[df_gastos['Ambiente'] == "Empresa"]
+            if not df_pj_r.empty: st.plotly_chart(px.pie(df_pj_r, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Bold), use_container_width=True)
+        with col_pf:
             st.markdown("### 🏠 Pessoal (PF)")
-            df_pf_r = df_v[df_v['Ambiente'] == "Pessoal"]
-            if not df_pf_r.empty: st.plotly_chart(px.pie(df_pf_r, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
+            df_pf_r = df_gastos[df_gastos['Ambiente'] == "Pessoal"]
+            if not df_pf_r.empty: st.plotly_chart(px.pie(df_pf_r, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Vivid), use_container_width=True)
     else: st.info("Sem dados.")
 
 with tab_conf:
-    if st.button("Sair"):
-        st.session_state.clear(); st.rerun()
+    if st.button("Sair"): st.session_state.clear(); st.rerun()
