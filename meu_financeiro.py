@@ -58,16 +58,10 @@ if "autenticado" not in st.session_state:
         u = st.text_input("Usuário").strip()
         p = st.text_input("Senha", type="password")
         if st.button("Acessar" if opcao == "Login" else "Cadastrar", use_container_width=True):
-            if opcao == "Login":
-                if (u == "Caique" and p == "11") or not df_acessos[(df_acessos["Usuario"] == u) & (df_acessos["Senha"] == hash_senha(p))].empty:
-                    st.session_state.autenticado, st.session_state.usuario = True, u
-                    st.rerun()
-                else: st.error("Erro no login.")
-            else:
-                if u and p:
-                    nova = pd.DataFrame([{"Usuario": u, "Senha": hash_senha(p)}])
-                    salvar_aba(pd.concat([df_acessos, nova], ignore_index=True), "acessos")
-                    st.success("Cadastrado!")
+            if (u == "Caique" and p == "11") or not df_acessos[(df_acessos["Usuario"] == u) & (df_acessos["Senha"] == hash_senha(p))].empty:
+                st.session_state.autenticado, st.session_state.usuario = True, u
+                st.rerun()
+            else: st.error("Erro no login.")
     st.stop()
 
 # --- 4. CARREGAMENTO PÓS-LOGIN ---
@@ -135,28 +129,29 @@ with tab_lanc:
                 det = df_pj_h[df_pj_h["OS"] == os_pj].iloc[0]
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
-                    c1.write(f"**Valor:** R$ {det['Valor']:,.2f}"); c2.write(f"**Pagto:** {det['Cartao']}"); c3.write(f"**NF:** {det['NF']}")
+                    c1.write(f"**Valor:** R$ {float(det['Valor']):,.2f}"); c2.write(f"**Pagto:** {det['Cartao']}"); c3.write(f"**NF:** {det['NF']}")
                     st.write(f"**Descrição:** {det['Descricao']}"); st.info(f"**Obs:** {det['Detalhes']}")
                     if st.button("🗑️ Excluir Nota PJ", key="del_pj"):
                         st.session_state.df = st.session_state.df[st.session_state.df["OS"] != os_pj]
                         salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
     with t_pf:
-        df_pf_h = df_h[df_h['Ambiente'] == "Pessoal"]
+        # CORREÇÃO DEFINITIVA DO TYPEERROR
+        df_pf_h = df_h[df_h['Ambiente'] == "Pessoal"].copy()
         st.dataframe(df_pf_h[["Data_Vencimento", "Descricao", "Status", "Categoria", "Valor"]], use_container_width=True, hide_index=True)
         if not df_pf_h.empty:
-            df_pf_h['Exibicao'] = df_pf_h['Descricao'] + " (" + df_pf_h['Categoria'] + ")"
+            df_pf_h['Exibicao'] = df_pf_h['Descricao'].astype(str) + " (" + df_pf_h['Categoria'].astype(str) + ")"
             sel_pf = st.selectbox("🔎 Selecionar por Descrição (PF):", ["---"] + df_pf_h['Exibicao'].tolist(), key="sb_pf")
             if sel_pf != "---":
                 det = df_pf_h[df_pf_h['Exibicao'] == sel_pf].iloc[0]
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
-                    c1.write(f"**Valor:** R$ {det['Valor']:,.2f}"); c2.write(f"**Pagto:** {det['Cartao']}"); c3.write(f"**Categoria:** {det['Categoria']}")
+                    c1.write(f"**Valor:** R$ {float(det['Valor']):,.2f}"); c2.write(f"**Pagto:** {det['Cartao']}"); c3.write(f"**Categoria:** {det['Categoria']}")
                     st.write(f"**Descrição:** {det['Descricao']}"); st.info(f"**Obs:** {det['Detalhes']}")
                     if st.button("🗑️ Excluir Nota PF", key="del_pf"):
                         st.session_state.df = st.session_state.df[st.session_state.df["OS"] != det["OS"]]
                         salvar_aba(st.session_state.df, "lancamentos"); st.rerun()
 
-# --- TAB CLIENTES ---
+# --- ABA CLIENTES ---
 with tab_clientes:
     c1, c2 = st.columns(2)
     with c1:
@@ -173,7 +168,7 @@ with tab_clientes:
             if col_b.button("🗑️", key=f"c_{idx}"):
                 st.session_state.clientes = st.session_state.clientes.drop(idx); salvar_aba(st.session_state.clientes, "clientes"); st.rerun()
 
-# --- TAB CARTÕES ---
+# --- ABA CARTÕES ---
 with tab_cartoes:
     c1, c2 = st.columns(2)
     with c1:
@@ -194,7 +189,7 @@ with tab_cartoes:
                 st.session_state.cartoes = st.session_state.cartoes.drop(idx); salvar_aba(st.session_state.cartoes, "cartoes"); st.rerun()
             st.divider()
 
-# --- TAB RELATÓRIOS ---
+# --- RELATÓRIOS ---
 with tab_relat:
     st.session_state.df = carregar_aba("lancamentos", cols_fin)
     df_user = st.session_state.df[st.session_state.df['Usuario'] == user]
@@ -211,7 +206,6 @@ with tab_relat:
             if not df_pf_r.empty: st.plotly_chart(px.pie(df_pf_r, values='Valor', names='Categoria', hole=.4, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
     else: st.info("Sem dados.")
 
-# --- SAIR ---
 with tab_conf:
     if st.button("Sair"):
         st.session_state.clear(); st.rerun()
